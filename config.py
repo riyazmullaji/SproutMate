@@ -1,0 +1,11 @@
+API_KEY =   # 'This is your Bolt Cloud API Key'
+DEVICE_ID =  # 'This is the device ID and will be similar to BOLTXXXX where XXXX is some numbers'
+SSID = #'Twilio SSID you can find it on console'
+AUTH_TOKEN = #'Auth Token of twilio'
+FROM_NUMBER = #'Twilio number'
+TO_NUMBER = #'Your number'
+FRAME_SIZE = 10
+MUL_FACTOR = 6
+threshold = 30
+CITY_NAME = "Mumbai" #you can change city
+WEATHER_API_KEY = #"Your Weather Api key"
