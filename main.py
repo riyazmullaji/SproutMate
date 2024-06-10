@@ -1,10 +1,10 @@
-import config
 import json
 import statistics
 import time
 from datetime import datetime, timedelta
 import requests
 from boltiot import Bolt, Sms
+import config  # Ensure this file contains your necessary configurations
 
 def compute_bounds(history_data, frame_size, factor):
     if len(history_data) < frame_size:
@@ -21,8 +21,23 @@ def compute_bounds(history_data, frame_size, factor):
 
     return [High_bound, Low_bound]
 
-def get_weather_forecast(city_name, api_key):
-    url = f"http://api.openweathermap.org/data/2.5/forecast?q={city_name}&appid={api_key}&units=metric"
+def get_coordinates(city_name, api_key):
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={api_key}"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        if "coord" in data:
+            return data["coord"]["lat"], data["coord"]["lon"]
+        else:
+            print(f"Error: {data['message']}")
+            return None, None
+    except requests.RequestException as e:
+        print(f"Error fetching coordinates: {e}")
+        return None, None
+
+def get_weather_forecast(lat, lon, api_key):
+    url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric"
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -42,12 +57,44 @@ def is_rain_expected(weather_forecast, time_delta=1, rain_threshold=2.5):
 
     for forecast in weather_forecast:
         forecast_time = datetime.fromtimestamp(forecast["dt"])
-        if forecast_time <= end_time:
-            if "rain" in forecast["weather"][0]["description"].lower():
+        if current_time <= forecast_time <= end_time:
+            description = forecast["weather"][0]["description"].lower()
+            print(f"Checking forecast for time: {forecast_time}, description: {description}")
+            if "rain" in description:
                 rain_intensity = forecast.get("rain", {}).get("3h", 0)
+                print(f"Rain intensity: {rain_intensity} mm")
                 if rain_intensity >= rain_threshold:
                     return True
     return False
+
+def send_sms(sms, message):
+    try:
+        response = sms.send_sms(message)
+        print("SMS Response: ", response)
+    except Exception as e:
+        print("Error sending SMS: ", e)
+
+def process_moisture_data(soil, bound, last_message_time, sms, rain_expected):
+    if soil < config.threshold:
+        if rain_expected:
+            print("Rain expected soon. No need to water the plants.")
+        else:
+            if (datetime.now() - last_message_time).total_seconds() >= 3600:
+                print("Moisture level low. Sending SMS.")
+                send_sms(sms, "Please water the plants")
+                last_message_time = datetime.now()
+
+    if soil > bound[0]:
+        print("Moisture level increased suddenly. Sending SMS.")
+        send_sms(sms, "Someone is damaging the plants")
+    elif soil < bound[1]:
+        print("Moisture level decreased suddenly. Sending SMS.")
+        send_sms(sms, "Someone is damaging the plants")
+
+    print("HIGH BOUND = ", bound[0])
+    print("LOW BOUND = ", bound[1])
+
+    return last_message_time
 
 def main():
     mybolt = Bolt(config.API_KEY, config.DEVICE_ID)
@@ -59,65 +106,53 @@ def main():
     last_message_time = datetime.now() - timedelta(seconds=3600)  # Set last_message_time 3600 seconds ago
 
     while True:
-        response = mybolt.analogRead('A0')
-        data = json.loads(response)
-        if data['success'] != 1:
-            print("There was an error while retrieving the data.")
-            print("This is the error:" + data['value'])
-            time.sleep(10)
-            continue
-
-        print("This is the value " + data['value'])
-
         try:
+            response = mybolt.analogRead('A0')
+            data = json.loads(response)
+            if data['success'] != 1:
+                print("Error retrieving data: ", data['value'])
+                time.sleep(10)
+                continue
+
             soil = (int(data['value']) / 1024) * 100
             soil = 100 - soil
-            print("The Moisture content is ", soil, " % mg/L")
+            print("Moisture content: ", soil, " %")
+
         except Exception as e:
-            print("There was an error while parsing the response: ", e)
+            print("Error parsing response: ", e)
+            time.sleep(10)
             continue
 
         bound = compute_bounds(history_data, config.FRAME_SIZE, config.MUL_FACTOR)
 
         if not bound:
             required_data_count = config.FRAME_SIZE - len(history_data)
-            print("Not enough data to compute Z-score. Need", required_data_count, "more data points")
+            print(f"Not enough data to compute Z-score. Need {required_data_count} more data points")
             history_data.append(soil)
             time.sleep(2)
             continue
 
         try:
-            weather_forecast = get_weather_forecast(config.CITY_NAME, api_key)
-            if soil < config.threshold:
-                if is_rain_expected(weather_forecast):
-                    print("Rain is expected within the next hour. No need to water the plants.")
+            lat, lon = get_coordinates(city_name, api_key)
+            if lat is not None and lon is not None:
+                weather_forecast = get_weather_forecast(lat, lon, api_key)
+                if weather_forecast:
+                    rain_expected = is_rain_expected(weather_forecast)
+                    print(f"Rain expected in the next hour: {rain_expected}")
                 else:
-                    if (datetime.now() - last_message_time).total_seconds() >= 3600:
-                        print("The Moisture level has decreased. Sending an SMS.")
-                        response = sms.send_sms("Please water the plants")
-                        print("This is the response ", response)
-                        last_message_time = datetime.now()  # Update last message time
+                    rain_expected = False
+            else:
+                print("Error fetching coordinates, skipping rain check.")
+                rain_expected = False
 
         except Exception as e:
-            print("There was an error while processing: ", e)
+            print("Error processing weather data: ", e)
+            rain_expected = False
 
-        try:
-            if soil > bound[0]:
-                print("The Moisture level increased suddenly. Sending an SMS.")
-                response = sms.send_sms("Someone is damaging the plants")
-                print("This is the response ", response)
-            elif soil < bound[1]:
-                print("The Moisture level decreased suddenly. Sending an SMS.")
-                response = sms.send_sms("Someone is damaging the plants")
-                print("This is the response ", response)
+        last_message_time = process_moisture_data(soil, bound, last_message_time, sms, rain_expected)
+        history_data.append(soil)
 
-            print("HIGH BOUND = ", bound[0])
-            print("LOW BOUND = ", bound[1])
-            history_data.append(soil)
-
-        except Exception as e:
-            print("Error", e)
         time.sleep(10)
 
 if __name__ == "__main__":
-   main()
+    main()
