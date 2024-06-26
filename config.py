@@ -1,14 +1,20 @@
-API_KEY = "YOUR_BOLT_CLOUD_API_KEY"  # Replace with your Bolt Cloud API Key
-DEVICE_ID = "YOUR_DEVICE_ID"  # Replace with your device ID (e.g., BOLTXXXX)
-SSID = 'YOUR_TWILIO_ACCOUNT_SID'  # Replace with your Twilio Account SID
-AUTH_TOKEN = 'YOUR_TWILIO_AUTH_TOKEN'  # Replace with your Twilio Auth Token
-FROM_NUMBER = 'YOUR_TWILIO_PHONE_NUMBER'  # Replace with your Twilio phone number
-TO_NUMBER = 'YOUR_PHONE_NUMBER'  # Replace with your phone number
-FRAME_SIZE = 10
-MUL_FACTOR = 6
-threshold = 30
-CITY_NAME = "Mumbai"
-WEATHER_API_KEY = "YOUR_OPENWEATHER_API_KEY"  # Replace with your OpenWeather API key
+# config.py
 
-# Note: Please replace the placeholders with your actual credentials before uploading to GitHub
+# Bolt device configuration
+API_KEY = "your_bolt_api_key"       # Replace with your Bolt Cloud API key
+DEVICE_ID = "your_device_id"        # Replace with your Bolt device ID
 
+# Twilio SMS service configuration
+SSID = "your_twilio_ssid"           # Replace with your Twilio SSID
+AUTH_TOKEN = "your_twilio_auth_token"  # Replace with your Twilio Auth Token
+TO_NUMBER = "recipient_phone_number"  # Replace with the recipient's phone number
+FROM_NUMBER = "twilio_phone_number"  # Replace with your Twilio phone number
+
+# OpenWeatherMap API configuration
+WEATHER_API_KEY = "your_openweathermap_api_key"  # Replace with your OpenWeatherMap API key
+CITY_NAME = "your_city_name"  # Replace with the city name for weather forecasting
+
+# Soil moisture monitoring configuration
+FRAME_SIZE = 10  # Number of data points for computing Z-score bounds
+MUL_FACTOR = 2  # Factor to multiply the standard deviation for setting bounds
+THRESHOLD = 30  # Soil moisture threshold to determine if watering is needed (%)
