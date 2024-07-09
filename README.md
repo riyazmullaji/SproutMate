@@ -1,6 +1,5 @@
 # SmartSprout
-Sun or Shower, Stay in Flower: Smart Planting
-SmartSprout is an intelligent plant care system that leverages Bolt IoT technology to monitor and optimize plant health. By integrating soil moisture sensors and real-time weather forecasts, SmartSprout ensures that your plants receive the care they need, rain or shine.
+Sprout Mate (SmartSprout) is an intelligent plant care system that utilizes Bolt IoT technology to monitor soil moisture and integrate real-time weather forecasts. By calculating Z-score bounds for moisture levels and fetching weather data from OpenWeatherMap, it ensures optimal plant health by sending SMS alerts for necessary actions, such as watering or protecting plants from potential damage. The system proactively prevents overwatering by considering upcoming rain and detects sudden moisture changes, offering a comprehensive, automated solution for plant care with minimal user intervention.
 
 ## Features
 
