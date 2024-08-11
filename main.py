@@ -5,24 +5,22 @@ import time
 from datetime import datetime, timedelta
 import requests
 from boltiot import Bolt, Sms
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 # Function to compute the Z-score bounds
 def compute_bounds(history_data, frame_size, factor):
-    # Ensure enough data points
     if len(history_data) < frame_size:
         return None
-
-    # Maintain a fixed-size history
     if len(history_data) > frame_size:
         del history_data[0:len(history_data) - frame_size]
-
-    # Calculate mean and standard deviation
     Mn = statistics.mean(history_data)
     StdDev = statistics.stdev(history_data)
     Zn = factor * StdDev
     High_bound = Mn + Zn
     Low_bound = Mn - Zn
-
     return [High_bound, Low_bound]
 
 # Function to get the weather forecast for a city
@@ -35,15 +33,14 @@ def get_weather_forecast(city_name, api_key):
         if data["cod"] == "200":
             return data["list"]
         else:
-            print(f"Error: {data['message']}")
+            logging.error(f"Error: {data['message']}")
             return None
     except requests.RequestException as e:
-        print(f"Error fetching weather data: {e}")
+        logging.error(f"Error fetching weather data: {e}")
         return None
 
 # Function to check if significant rain is expected in the next forecast
 def is_rain_expected(weather_forecast):
-    # Define rain description thresholds
     rain_descriptions = {
         'light rain': 1,
         'moderate rain': 2,
@@ -56,103 +53,105 @@ def is_rain_expected(weather_forecast):
         'light intensity shower rain': 9,
         'heavy intensity shower rain': 10,
     }
-
     next_forecast = weather_forecast[0]
     forecast_time = datetime.fromtimestamp(next_forecast["dt"])
     current_time = datetime.now()
+    logging.info(f"Forecast time: {forecast_time}, Current time: {current_time}")
 
-    print(f"Forecast time: {forecast_time}, Current time: {current_time}")
-
-    # Check the description of the next forecast
     for condition in next_forecast["weather"]:
         description = condition["description"].lower()
-        print(f"Weather description: {description}")
+        logging.info(f"Weather description: {description}")
+        if description in rain_descriptions and rain_descriptions[description] >= 2:
+            return True, description
 
-        if description in rain_descriptions:
-            if rain_descriptions[description] >= 2:  # Moderate rain or more intense
-                return True, description
-    
     return False, "no significant rain"
 
+# Function to check for adverse weather conditions
+def is_adverse_weather(weather_forecast):
+    adverse_conditions = {
+        'thunderstorm': 'Thunderstorm conditions are expected.',
+        'extreme rain': 'Extreme rain is expected.',
+        'freezing rain': 'Freezing rain is expected.',
+        'heavy snow': 'Heavy snow is expected.',
+        'sleet': 'Sleet is expected.',
+        'heavy shower snow': 'Heavy shower snow is expected.',
+        'volcanic ash': 'Volcanic ash is expected.',
+        'squalls': 'Squalls are expected.',
+        'tornado': 'Tornado conditions are expected.'
+    }
+
+    for forecast in weather_forecast:
+        for condition in forecast["weather"]:
+            description = condition["description"].lower()
+            for key in adverse_conditions:
+                if key in description:
+                    return True, adverse_conditions[key]
+    return False, "No adverse weather conditions expected."
+
+# Function to read sensor data
+def read_sensor_data(bolt):
+    response = bolt.analogRead('A0')
+    data = json.loads(response)
+    if data['success'] != 1:
+        logging.error(f"Error retrieving data: {data['value']}")
+        return None
+    return int(data['value'])
+
+# Function to send SMS
+def send_sms(sms, message):
+    try:
+        response = sms.send_sms(message)
+        logging.info(f"SMS sent: {response}")
+    except Exception as e:
+        logging.error(f"Error sending SMS: {e}")
+
 def main():
-    # Initialize Bolt and SMS objects
     mybolt = Bolt(config.API_KEY, config.DEVICE_ID)
     sms = Sms(config.SSID, config.AUTH_TOKEN, config.TO_NUMBER, config.FROM_NUMBER)
     history_data = []
     api_key = config.WEATHER_API_KEY
     city_name = config.CITY_NAME
-
-    # Initialize last message time
     last_message_time = datetime.now() - timedelta(seconds=3600)
+    weather_forecast = get_weather_forecast(city_name, api_key)
 
     while True:
-        # Read sensor data
-        response = mybolt.analogRead('A0')
-        data = json.loads(response)
-        if data['success'] != 1:
-            print("There was an error while retrieving the data.")
-            print("This is the error:" + data['value'])
-            time.sleep(10)
+        sensor_value = read_sensor_data(mybolt)
+        if sensor_value is None:
+            time.sleep(5)
             continue
 
-        print("This is the value " + data['value'])
-
-        try:
-            # Calculate soil moisture percentage
-            soil = (int(data['value']) / 1024) * 100
-            soil = 100 - soil
-            print("The Moisture content is ", soil, " % mg/L")
-
-        except Exception as e:
-            print("There was an error while parsing the response: ", e)
-            continue
-
-        # Compute Z-score bounds for soil moisture
+        soil = 100 - (sensor_value / 1024) * 100
+        logging.info(f"The Moisture content is {soil:.2f} % mg/L")
         bound = compute_bounds(history_data, config.FRAME_SIZE, config.MUL_FACTOR)
 
         if not bound:
             required_data_count = config.FRAME_SIZE - len(history_data)
-            print("Not enough data to compute Z-score. Need", required_data_count, "more data points")
+            logging.info(f"Not enough data to compute Z-score. Need {required_data_count} more data points")
             history_data.append(soil)
-            time.sleep(2)
+            time.sleep(5)
             continue
 
-        try:
-            # Fetch weather forecast data
-            weather_forecast = get_weather_forecast(config.CITY_NAME, api_key)
-            if soil < config.THRESHOLD:
-                rain_expected, rain_description = is_rain_expected(weather_forecast)
-                if rain_expected:
-                    print("Rain is expected soon. No need to water the plants.")
-                    print("Rain description in the next forecast:", rain_description)
-                else:
-                    if (datetime.now() - last_message_time).total_seconds() >= 3600:
-                        print("The Moisture level has decreased. Sending an SMS.")
-                        response = sms.send_sms("Please water the plants")
-                        print("This is the response ", response)
-                        last_message_time = datetime.now()  # Update last message time
+        if soil < config.THRESHOLD:
+            rain_expected, rain_description = is_rain_expected(weather_forecast)
+            if rain_expected:
+                logging.info(f"Rain is expected soon: {rain_description}")
+            elif (datetime.now() - last_message_time).total_seconds() >= 3600:
+                logging.info("The Moisture level has decreased. Sending an SMS.")
+                send_sms(sms, "Please water the plants")
+                last_message_time = datetime.now()
 
-        except Exception as e:
-            print("There was an error while processing: ", e)
+        adverse_weather, adverse_message = is_adverse_weather(weather_forecast)
+        if adverse_weather:
+            logging.info(f"Adverse weather condition detected: {adverse_message}")
+            send_sms(sms, f"Alert: {adverse_message}")
 
-        try:
-            # Check if soil moisture levels are outside bounds
-            if soil > bound[0]:
-                print("The Moisture level increased suddenly. Sending an SMS.")
-                response = sms.send_sms("Someone is damaging the plants")
-                print("This is the response ", response)
-            elif soil < bound[1]:
-                print("The Moisture level decreased suddenly. Sending an SMS.")
-                response = sms.send_sms("Someone is damaging the plants")
-                print("This is the response ", response)
+        if soil < bound[1]:
+            logging.info("The Moisture level decreased suddenly. Sending an SMS.")
+            send_sms(sms, "Someone is damaging the plants")
 
-            # Print bounds for debugging
-            print("HIGH BOUND = ", bound[0])
-            print("LOW BOUND = ", bound[1])
-            history_data.append(soil)
-
-        except Exception as e:
-            print("Error", e)
+        logging.debug(f"HIGH BOUND = {bound[0]}")
+        logging.debug(f"LOW BOUND = {bound[1]}")
+        history_data.append(soil)
         time.sleep(10)
 
 if __name__ == "__main__":
